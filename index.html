@@ -600,8 +600,6 @@ function showStep(step){
     const el=document.getElementById(id);
     if(el)el.style.display=(id===step)?'flex':'none';
   });
-  const titles={stepName:'📖 문장 연습',stepDiff:'📖 난이도 선택',stepStory:'📖 동화 선택'};
-  document.getElementById('songNavTitle').textContent=titles[step]||'📖 문장 연습';
 }
 function showSongScreen(){
   showStep('stepName');
