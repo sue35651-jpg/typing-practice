@@ -83,6 +83,7 @@ body{background:var(--bg);font-family:var(--fn);min-height:100vh;overflow:hidden
 .tbtn:hover .tip{opacity:1;}
 #btnEng{font-size:.85rem;font-family:var(--fn);font-weight:bold;}
 #btnEng.on{background:#ff7043;color:white;border-color:#ff7043;}
+#btnFreeMode.on{background:#7b1fa2;color:white;border-color:#7b1fa2;font-size:.75rem;}
 .pcontent{flex:1;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 20px;gap:10px;overflow:hidden;}
 .tarea{display:flex;flex-direction:column;align-items:center;}
 .letterbox{width:var(--tbs,192px);height:var(--tbs,192px);background:linear-gradient(135deg,#26c6da,#0288d1);border-radius:calc(var(--tbs,192px)*.18);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 30px rgba(2,136,209,.33);animation:pulse 1.5s ease-in-out infinite;position:relative;overflow:hidden;transition:background .3s,box-shadow .3s;}
@@ -283,6 +284,7 @@ body.hiden .key{justify-content:center;}
       <button class="tbtn" id="btnH1">🪟<span class="tip">힌트1: 가림판</span></button>
       <button class="tbtn" id="btnH2">🔍<span class="tip">힌트2: 돋보기</span></button>
       <button class="tbtn" id="btnH3">🎨<span class="tip">힌트3: 색상</span></button>
+      <button class="tbtn" id="btnFreeMode" style="font-size:.75rem;font-family:'Jua',sans-serif;font-weight:bold;">정확<span class="tip">입력모드: 정확(오답차단) ↔ 자유(직접수정)</span></button>
       <button class="tbtn" id="btnEng">Ａ<span class="tip">영어 on/off</span></button>
       <button class="tbtn" id="btnHome">🏠<span class="tip">처음으로</span></button>
       <button class="tbtn" id="btnFS">⛶<span class="tip">전체화면</span></button>
@@ -482,6 +484,13 @@ function buildCKM(){
   Object.entries(shiftMap).forEach(([shifted,base])=>{if(m[base])m[shifted]={ri:m[base].ri,ci:m[base].ci,shift:true};});
   '1234567890'.split('').forEach(n=>{const loc=KBR[0].findIndex(k=>k.en===n);if(loc>=0)m[n]={ri:0,ci:loc};});
   m['~']={ri:0,ci:0};
+  // ★ 문장연습 특수문자 추가 (Shift 조합)
+  // "  → Shift + ' (row2, 11번째)
+  m['"']={ri:2,ci:11,shift:true};
+  // !  → Shift + 1 (row0, 1번째)
+  m['!']={ri:0,ci:1,shift:true};
+  // ?  → Shift + / (row3, 10번째)
+  m['?']={ri:3,ci:10,shift:true};
   return m;
 }
 const CKM=buildCKM();
@@ -562,6 +571,7 @@ let totalJasoTyped=0,totalSpaceTyped=0; // 한컴타자 방식 타수 카운트
 let hTimer=null,wrongLTimer=null,wrongWTimer=null;
 let neonOn=false,engHid=false;
 let h1=false,h2=false,h3=false;
+let freeMode=false; // 자유입력 모드: true=모든 타자 허용(직접수정), false=오답차단(기본)
 let qJamos=[],inJamos=[],jPtr=0,wDone=false;
 let lastJamoForDouble=null;
 // #42: 낱글자 입력 잠금 (빠른 연속 입력 방지)
@@ -669,18 +679,19 @@ function getBatchimInfo(name){
 function getJosa(name,tag){
   const{hasBatchim,isRieul}=getBatchimInfo(name);
   switch(tag){
-    case '는':return hasBatchim?'은':'는';
-    case '가':return hasBatchim?'이':'가';
-    case '를':return hasBatchim?'을':'를';
-    case '와':return hasBatchim?'과':'와';
-    case '의':return '의';
-    case '아':return hasBatchim?'아':'야';
-    case '에게':return '에게';
-    case '도':return '도';
-    case '처럼':return '처럼';
-    case '만의':return '만의';
-    case '으로':return(!hasBatchim||isRieul)?'로':'으로';
-    default:return tag; // 미정의 태그는 그대로
+    // 받침 있으면 자음 충돌 방지를 위해 '이' 삽입
+    case '는': return hasBatchim?'이는':'는';    // 태현이는 / 진희는
+    case '가': return hasBatchim?'이가':'가';    // 태현이가 / 진희가
+    case '를': return hasBatchim?'이를':'를';    // 태현이를 / 진희를
+    case '와': return hasBatchim?'이와':'와';    // 태현이와 / 진희와
+    case '의': return '의';
+    case '아': return hasBatchim?'아':'야';      // 태현아 / 진희야
+    case '에게': return '에게';
+    case '도': return '도';
+    case '처럼': return '처럼';
+    case '만의': return '만의';
+    case '으로': return(!hasBatchim||isRieul)?'로':'으로'; // 노을로/태현으로
+    default: return tag;
   }
 }
 function fillStudentName(template,name){
@@ -819,10 +830,15 @@ function showQ(){
     const text=questions[qIdx];
     qJamos=decText(text);
     consumeMarkers();
-    renderPrompt(-1);
+    if(freeMode){renderPromptFree();}else{renderPrompt(-1);}
     const wi=document.getElementById('witext');if(wi){wi.textContent='';wi.className='witext';}
     adjFontSize(text);
-    hlKey(qJamos[jPtr]||'');
+    if(freeMode){
+      const first=getFreeNextJamo();
+      if(first&&first!=='__backspace__')hlKey(first);
+    }else{
+      hlKey(qJamos[jPtr]||'');
+    }
   }
   applyHints();updateStats();
   hTimer=setTimeout(()=>{if(!neonOn)applyNeon();},3000);
@@ -917,6 +933,10 @@ function hlKey(ch){
   const loc=CKM[ch];if(!loc)return;
   const keyEl=document.querySelector(`#kwrap [data-ri="${loc.ri}"][data-ci="${loc.ci}"]`);
   if(!keyEl)return;
+  // shift:true인 문자 (", !, ? 등)는 Shift 키도 함께 강조
+  if(loc.shift){
+    document.querySelectorAll('#kwrap [data-en="Shift"]').forEach(s=>s.classList.add('hl'));
+  }
   if(h3&&stage){
     const color=getKCM(stage)[ch]||'#4fc3f7';
     keyEl.style.background=color;keyEl.style.borderColor=color;
@@ -974,22 +994,47 @@ function applyHints(){
 // #4: applyNeon — null 마커 건너뜀
 function applyNeon(){
   neonOn=true;
-  let p=jPtr;while(p<qJamos.length&&qJamos[p]===null)p++;
-  const ch=mode==='letter'?questions[qIdx]:qJamos[p];
+  let ch;
+  if(freeMode){
+    const next=getFreeNextJamo();
+    if(next==='__backspace__'){
+      // 백스페이스 네온
+      const bk=document.querySelector('#kwrap [data-en="Backspace"]');
+      if(bk){bk.classList.add('neon');bk.classList.remove('hl');}
+      return;
+    }
+    ch=next;
+  }else{
+    let p=jPtr;while(p<qJamos.length&&qJamos[p]===null)p++;
+    ch=mode==='letter'?questions[qIdx]:qJamos[p];
+  }
   if(!ch||ch===' ')return;
   const loc=CKM[ch];
-  if(loc){const el=document.querySelector(`#kwrap [data-ri="${loc.ri}"][data-ci="${loc.ci}"]`);if(el){el.classList.add('neon');el.classList.remove('hl');}}
+  if(loc){
+    const el=document.querySelector(`#kwrap [data-ri="${loc.ri}"][data-ci="${loc.ci}"]`);
+    if(el){el.classList.add('neon');el.classList.remove('hl');}
+    if(loc.shift){
+      document.querySelectorAll('#kwrap [data-en="Shift"]').forEach(s=>{s.classList.add('neon');s.classList.remove('hl');});
+    }
+  }
   const mel=document.querySelector(`#magview [data-magko="${ch}"]`);if(mel)mel.classList.add('neon');
 }
 function clearNeon(){neonOn=false;document.querySelectorAll('.key.neon,.mkey.neon').forEach(k=>k.classList.remove('neon'));}
 function updateHBtns(){
   const isLetter=(mode==='letter');
-  // 힌트1,2,3: 낱글자모드에서만 표시, 단어/문장모드에서는 완전히 숨김
   ['btnH1','btnH2','btnH3'].forEach((id,i)=>{
     const b=document.getElementById(id);if(!b)return;
     b.style.display=isLetter?'':'none';
     if(isLetter)b.classList.toggle('on',[h1,h2,h3][i]);
   });
+  // freeMode 버튼 상태 항상 동기화
+  const bf=document.getElementById('btnFreeMode');
+  if(bf){
+    bf.classList.toggle('on',freeMode);
+    bf.innerHTML=freeMode
+      ?'자유<span class="tip">입력모드: 자유(직접수정) — 클릭하면 정확 모드로</span>'
+      :'정확<span class="tip">입력모드: 정확(오답차단) — 클릭하면 자유 모드로</span>';
+  }
 }
 function pressK(ch){
   let el=null;
@@ -1068,18 +1113,27 @@ document.addEventListener('keydown',e=>{
     if(e.key==='Backspace'){
       e.preventDefault();
       if(inJamos.length>0){
-        const last=inJamos[inJamos.length-1];
         inJamos.pop();
-        // jPtr을 한 칸 뒤로
-        jPtr=Math.max(0,jPtr-1);
-        // jPtr이 null 마커 위치면 한 칸 더 뒤로 (글자 경계 마커 건너뜀)
-        while(jPtr>0&&qJamos[jPtr]===null)jPtr--;
         lastJamoForDouble=null;
-        renderPrompt(-1);
-        const wi=document.getElementById('witext');if(wi)wi.textContent=j2s(inJamos);
-        // 앞방향 null 마커 소비 후 현재 위치 강조
-        consumeMarkers();
-        const cur=qJamos[jPtr];if(cur&&cur!==' '){hlKey(cur);applyHints();}
+        if(freeMode){
+          // 자유모드: inJamos에서 pop만, jPtr은 사용 안 함
+          // 다음 강조할 키 계산
+          renderPromptFree();
+          const wi=document.getElementById('witext');
+          if(wi){wi.textContent=j2s(inJamos);wi.className='witext';}
+          const next=getFreeNextJamo();
+          if(next==='__backspace__'){hlBackspace();}
+          else if(next){hlKey(next);applyHints();}
+        }else{
+          // 정확모드: jPtr도 내림
+          jPtr=Math.max(0,jPtr-1);
+          while(jPtr>0&&qJamos[jPtr]===null)jPtr--;
+          renderPrompt(-1);
+          const wi=document.getElementById('witext');
+          if(wi){wi.textContent=j2s(inJamos);wi.className='witext';}
+          consumeMarkers();
+          const cur=qJamos[jPtr];if(cur&&cur!==' '){hlKey(cur);applyHints();}
+        }
       }
       return;
     }
@@ -1106,19 +1160,20 @@ document.addEventListener('keydown',e=>{
 // #10: 낱글자 — 정답에도 attempts 증가
 let wrongLTimerRef=null;
 function handleLetter(ch){
-  if(letterLocked)return; // #42
+  if(letterLocked)return;
   const exp=questions[qIdx];
-  attempts++; // #10: 정답/오답 모두 attempts 증가
+  attempts++;
   if(ch===exp){
     correct++;keyTs.push(Date.now());
-    totalJasoTyped++; // 낱글자 타수 카운트
+    totalJasoTyped++;
     playOK();flashOK();if(Math.random()<.25)confetti(3);
     pressK(ch);
-    letterLocked=true; // #42: 다음 문제 표시 전까지 잠금
+    letterLocked=true;
     qIdx++;
     if(qIdx>=questions.length)setTimeout(()=>showResult(),400);
     else setTimeout(()=>{letterLocked=false;showQ();},200);
   }else{
+    // 자유입력 모드: 오답도 표시만 하고 막지 않음 (낱글자는 특성상 동일)
     playNG();flashNG();updateStats();
     clearTimeout(wrongLTimerRef);
     const lc=document.getElementById('lchar'),box=document.getElementById('lbox');
@@ -1145,18 +1200,133 @@ function consumeMarkers(){
 }
 
 let wrongWTimerRef=null;
+
+// 자유입력 모드 헬퍼
+// null 제거 후 qJamos와 inJamos 비교
+function getFreeMatchLen(){
+  // inJamos 앞에서부터 qJamos(null제외)와 연속으로 일치하는 길이
+  const q=[...qJamos].filter(x=>x!==null);
+  let match=0;
+  for(let i=0;i<inJamos.length;i++){
+    if(i>=q.length)break;
+    if(inJamos[i]===q[i])match++;
+    else break;
+  }
+  return match;
+}
+function isFreeComplete(){
+  const q=qJamos.filter(x=>x!==null);
+  if(inJamos.length!==q.length)return false;
+  return inJamos.every((ch,i)=>ch===q[i]);
+}
+// 자유입력 모드: 현재 키보드 강조할 자모 (matchLen 기준)
+function getFreeNextJamo(){
+  const q=qJamos.filter(x=>x!==null);
+  const match=getFreeMatchLen();
+  // inJamos가 match까지 맞았고 그 다음에 틀린 게 있으면 → 현재 위치의 정답
+  if(inJamos.length>match){
+    // 틀린 상태: 지워야 함 → Backspace 강조
+    return '__backspace__';
+  }
+  return q[match]||null;
+}
+// 자유입력 모드 renderPrompt: matchLen 기준으로 색상
+function renderPromptFree(){
+  const text=questions[qIdx];if(!text)return;
+  const el=document.getElementById('wprompt');if(!el)return;
+  const match=getFreeMatchLen();
+  const hasWrong=inJamos.length>match; // 틀린 자모 있음
+  const q=qJamos.filter(x=>x!==null);
+  let html='',jOff=0,cIdx=0;
+  for(const ch of text){
+    if(ch===' '){html+=' ';continue;}
+    const code=ch.charCodeAt(0);
+    const dlen=(code>=0xAC00&&code<=0xD7A3)?decChar(ch).length:1;
+    const start=jOff,end=jOff+dlen;
+    let cls;
+    if(end<=match)cls='dl'; // 정확히 완료
+    else if(hasWrong&&start===match)cls='wl'; // 현재 틀린 글자
+    else if(start===match&&!hasWrong)cls='cl'; // 현재 커서
+    else cls='tl';
+    html+=`<span class="${cls}">${ch}</span>`;
+    jOff+=dlen;cIdx++;
+  }
+  el.innerHTML=html;
+}
+
 function handleJamo(ch){
   if(wDone)return;
+
+  if(freeMode){
+    // ═══ 자유입력 모드 ═══
+    if(ch===' '&&wDone)return;
+    const q=qJamos.filter(x=>x!==null);
+    const match=getFreeMatchLen();
+    const hasWrong=inJamos.length>match;
+
+    if(hasWrong){
+      // 틀린 상태: 입력 차단 (Backspace로만 수정 가능)
+      // 사운드/플래시로 안내
+      playNG();
+      const wi=document.getElementById('witext');
+      if(wi)wi.className='witext ng';
+      return;
+    }
+
+    // 다음 기대 자모
+    const exp=q[inJamos.length];
+    if(exp===undefined)return; // 이미 완료
+
+    inJamos.push(ch);
+
+    if(ch===exp){
+      // 정답
+      playOK();pressK(ch);
+      if(ch===' ')totalSpaceTyped++;
+      else totalJasoTyped++;
+      lastJamoForDouble=DOUBLE_CHO[ch]!==undefined?ch:null;
+      const wi=document.getElementById('witext');
+      if(wi){wi.textContent=j2s(inJamos);wi.className='witext';}
+      renderPromptFree();
+      clearTimeout(hTimer);
+      if(isFreeComplete()){
+        wDone=true;showWDone();
+      }else{
+        const next=getFreeNextJamo();
+        if(next&&next!=='__backspace__'){hlKey(next);applyHints();}
+        hTimer=setTimeout(()=>{if(!neonOn)applyNeon();},3000);
+      }
+    }else{
+      // 오답: 입력창에 표시하고 빨간 피드백
+      attempts++;
+      playNG();flashNG();
+      lastJamoForDouble=null;
+      const wi=document.getElementById('witext');
+      if(wi){wi.textContent=j2s(inJamos);wi.className='witext ng';}
+      renderPromptFree();
+      clearTimeout(wrongWTimerRef);
+      wrongWTimerRef=setTimeout(()=>{
+        const w=document.getElementById('witext');
+        if(w&&w.className==='witext ng')w.className='witext';
+      },600);
+      // 틀린 상태: Backspace 키 강조
+      hlBackspace();
+    }
+    updateStats();
+    return;
+  }
+
+  // ═══ 정확 모드(기본) ═══
   consumeMarkers();
   const exp=qJamos[jPtr];if(exp===undefined)return;
 
-  // 쌍자음 연속입력: 같은 자음 두 번 → 쌍자음 (글자 경계 안에서만)
+  // 쌍자음 연속입력
   if(ch!==exp&&ch!==' '){
     const doubled=DOUBLE_CHO[ch];
     if(doubled&&lastJamoForDouble===ch&&doubled===exp){
       if(inJamos.length>0&&inJamos[inJamos.length-1]===ch){
         inJamos[inJamos.length-1]=doubled;
-        totalJasoTyped++; // 쌍자음도 1타로 카운트
+        totalJasoTyped++;
         playOK();pressK(ch);
         const wi=document.getElementById('witext');if(wi)wi.textContent=j2s(inJamos);
         jPtr++;
@@ -1175,11 +1345,10 @@ function handleJamo(ch){
 
   if(ch===exp){
     playOK();pressK(ch);inJamos.push(ch);jPtr++;
-    // 한컴타자 방식 타수 카운트
     if(ch===' ')totalSpaceTyped++;
     else totalJasoTyped++;
     lastJamoForDouble=DOUBLE_CHO[ch]!==undefined?ch:null;
-    consumeMarkers(); // 경계 넘으면 lastJamoForDouble null로 덮어씀
+    consumeMarkers();
     const wi=document.getElementById('witext');if(wi)wi.textContent=j2s(inJamos);
     renderPrompt(-1);
     clearTimeout(hTimer);
@@ -1194,6 +1363,17 @@ function handleJamo(ch){
     wrongWTimerRef=setTimeout(()=>renderPrompt(-1),600);
   }
   updateStats();
+}
+
+// Backspace 키 강조 헬퍼
+function hlBackspace(){
+  document.querySelectorAll('#kwrap .key').forEach(k=>{
+    k.classList.remove('hl','neon');
+    ['background','border-color','box-shadow'].forEach(p=>k.style.removeProperty(p));
+    const ko=k.querySelector('.kko');if(ko)ko.style.removeProperty('color');
+  });
+  const bk=document.querySelector('#kwrap [data-en="Backspace"]');
+  if(bk)bk.classList.add('hl');
 }
 
 function showWDone(){
@@ -1212,7 +1392,16 @@ function showWDone(){
 // #7: handleEnter — inJamos가 비어있으면 아무것도 안 함
 function handleEnter(){
   if(wDone){advNext();return;}
-  if(inJamos.length===0)return; // #7: 빈 Enter 무시
+  if(freeMode){
+    // 자유모드: isFreeComplete일 때만 통과, 아니면 피드백
+    if(isFreeComplete()){wDone=true;showWDone();advNext();return;}
+    if(inJamos.length===0)return;
+    playNG();flashNG();attempts++;
+    renderPromptFree();
+    updateStats();
+    return;
+  }
+  if(inJamos.length===0)return;
   playNG();flashNG();attempts++;
   renderPrompt(getCIdx());
   clearTimeout(wrongWTimerRef);
@@ -1390,6 +1579,17 @@ document.getElementById('btnH3').addEventListener('click',()=>{
   const ch=mode==='letter'?questions[qIdx]:qJamos[jPtr];
   if(mode==='letter')applyLBColor(ch||'');
   if(ch)hlKey(ch);
+});
+document.getElementById('btnFreeMode').addEventListener('click',()=>{
+  freeMode=!freeMode;
+  const b=document.getElementById('btnFreeMode');
+  if(b){
+    b.classList.toggle('on',freeMode);
+    b.textContent='';
+    b.innerHTML=freeMode
+      ? '자유<span class="tip">입력모드: 자유(직접수정) — 클릭하면 정확 모드로</span>'
+      : '정확<span class="tip">입력모드: 정확(오답차단) — 클릭하면 자유 모드로</span>';
+  }
 });
 document.getElementById('btnEng').addEventListener('click',()=>{
   engHid=!engHid;document.body.classList.toggle('hiden',engHid);
